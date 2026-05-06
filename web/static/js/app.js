@@ -339,6 +339,10 @@ class TrainingDashboard {
         this.statusEl = document.getElementById('trainingStatus');
         this.stepEl = document.getElementById('trainingStep');
         this.gamesEl = document.getElementById('trainingGames');
+        this.gphEl = document.getElementById('trainingGPH');
+        this.bufferEl = document.getElementById('trainingBuffer');
+        this.workersEl = document.getElementById('trainingWorkers');
+        this.lossEl = document.getElementById('trainingLoss');
     }
 
     initCharts() {
@@ -487,20 +491,50 @@ class TrainingDashboard {
 
     updateStatus(status) {
         this.statusEl.textContent = status;
-        this.statusEl.style.color = status === 'Running' ? '#51cf66' : '#ff6b6b';
+        if (status === 'Running') {
+            this.statusEl.style.color = '#51cf66';
+        } else if (status === 'Evaluating' || status === 'Saving checkpoint') {
+            this.statusEl.style.color = '#ffd43b';
+        } else {
+            this.statusEl.style.color = '#ff6b6b';
+        }
     }
 
     handleMetrics(data) {
         if (data.status) {
-            this.updateStatus(data.status === 'running' ? 'Running' : 'Paused');
+            const statusMap = {
+                'running': 'Running',
+                'paused': 'Paused',
+                'evaluating': 'Evaluating...',
+                'saving_checkpoint': 'Saving checkpoint...',
+                'resumed': 'Running',
+                'completed': 'Completed',
+            };
+            this.updateStatus(statusMap[data.status] || data.status);
         }
 
         if (data.step !== undefined) {
             this.stepEl.textContent = data.step;
         }
 
-        if (data.games_played !== undefined) {
-            this.gamesEl.textContent = data.games_played;
+        if (data.games_consumed !== undefined) {
+            this.gamesEl.textContent = data.games_consumed;
+        }
+
+        if (data.games_per_hour !== undefined) {
+            this.gphEl.textContent = Math.round(data.games_per_hour).toLocaleString();
+        }
+
+        if (data.buffer_size !== undefined) {
+            this.bufferEl.textContent = data.buffer_size.toLocaleString();
+        }
+
+        if (data.worker_count !== undefined) {
+            this.workersEl.textContent = data.worker_count;
+        }
+
+        if (data.total_loss !== undefined && data.total_loss > 0) {
+            this.lossEl.textContent = data.total_loss.toFixed(4);
         }
 
         // Update loss chart

@@ -1,2 +1,7 @@
 __pycache__
 */__pycache__
+data
+screenshots
+data/*
+screenshots/*
+

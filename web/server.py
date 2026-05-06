@@ -144,6 +144,17 @@ class LoadCheckpointRequest(BaseModel):
     checkpoint_path: str
 
 
+class TrainingStartRequest(BaseModel):
+    total_steps: int = 100_000
+    num_workers: int = 16
+    num_simulations: int = 100
+    mcts_batch_size: int = 16
+    inference_batch_size: int = 64
+    training_batch_size: int = 256
+    lr: float = 1e-3
+    use_fp16: bool = False
+
+
 # API Endpoints
 @app.post("/api/game/new")
 def new_game(request: NewGameRequest):
@@ -217,11 +228,20 @@ def get_thinking(session_id: str):
 def load_checkpoint(request: LoadCheckpointRequest):
     """Load a model checkpoint for play."""
     global _model, _mcts
-    if not os.path.exists(request.checkpoint_path):
+    checkpoint_path = request.checkpoint_path
+    
+    # If path is a directory, look for model.pt inside it
+    if os.path.isdir(checkpoint_path):
+        model_path = os.path.join(checkpoint_path, 'model.pt')
+        if os.path.exists(model_path):
+            checkpoint_path = model_path
+        else:
+            raise HTTPException(status_code=404, detail="Checkpoint directory does not contain model.pt")
+    elif not os.path.exists(checkpoint_path):
         raise HTTPException(status_code=404, detail="Checkpoint not found")
 
     try:
-        checkpoint = torch.load(request.checkpoint_path, map_location=_device, weights_only=False)
+        checkpoint = torch.load(checkpoint_path, map_location=_device, weights_only=False)
         if 'model_state_dict' in checkpoint:
             state_dict = checkpoint['model_state_dict']
         else:
@@ -234,13 +254,25 @@ def load_checkpoint(request: LoadCheckpointRequest):
         _mcts = MCTS(_model, num_simulations=800)
         return {'status': 'success', 'message': 'Checkpoint loaded'}
     except Exception as e:
+        import traceback
+        print(f"[Checkpoint Load Error] {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/training/start")
-def training_start():
-    """Start training."""
-    return training_manager.start(total_steps=100_000)
+def training_start(request: TrainingStartRequest = TrainingStartRequest()):
+    """Start fast async training."""
+    return training_manager.start(
+        total_steps=request.total_steps,
+        num_workers=request.num_workers,
+        num_simulations=request.num_simulations,
+        mcts_batch_size=request.mcts_batch_size,
+        inference_batch_size=request.inference_batch_size,
+        training_batch_size=request.training_batch_size,
+        lr=request.lr,
+        use_fp16=request.use_fp16,
+    )
 
 
 @app.post("/api/training/stop")

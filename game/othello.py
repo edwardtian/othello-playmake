@@ -159,17 +159,77 @@ class OthelloGame:
 
         return True, f"Move ({row},{col}) by player {player}, flipped {len(flips)} stones"
 
+    def undo_move(self, action: int, flipped_positions: List[Tuple[int, int]], player: int):
+        """
+        Undo a previously made move, restoring the board to its previous state.
+        This mutates the board in-place and is significantly faster than copying.
+
+        Args:
+            action: The action that was played (0-63)
+            flipped_positions: List of (row, col) that were flipped by the move
+            player: The player who made the move
+        """
+        if action == PASS_ACTION:
+            self.pass_count -= 1
+            self.current_player = player
+            if self.move_history and self.move_history[-1][0] == PASS_ACTION:
+                self.move_history.pop()
+            return
+
+        row, col = action // BOARD_SIZE, action % BOARD_SIZE
+        opponent = self.get_opponent(player)
+
+        # Remove the placed stone
+        self.board[row, col] = EMPTY
+
+        # Flip stones back to opponent's color
+        for r, c in flipped_positions:
+            self.board[r, c] = opponent
+
+        # Restore whose turn it was
+        self.current_player = player
+        self.pass_count = 0
+
+        # Pop from history if it matches
+        if self.move_history and self.move_history[-1][0] == action:
+            self.move_history.pop()
+
+    def pop_move(self) -> bool:
+        """
+        Undo the most recent move from move_history.
+        Returns True if a move was undone, False if history is empty.
+        """
+        if not self.move_history:
+            return False
+
+        action, player, flips = self.move_history.pop()
+        self.undo_move(action, flips, player)
+        return True
+
     def is_game_over(self) -> bool:
         """
         Game is over if:
         - Both players pass consecutively, OR
-        - Board is full
+        - Board is full, OR
+        - Neither player has any legal moves
         """
         if self.pass_count >= 2:
             return True
         if np.count_nonzero(self.board == EMPTY) == 0:
             return True
+        # Check if both players have no legal moves
+        black_moves = self.get_legal_moves(BLACK)
+        white_moves = self.get_legal_moves(WHITE)
+        if len(black_moves) == 1 and black_moves[0] == PASS_ACTION \
+                and len(white_moves) == 1 and white_moves[0] == PASS_ACTION:
+            return True
         return False
+
+    def count_pieces(self) -> Tuple[int, int]:
+        """Return (black_count, white_count) regardless of game state."""
+        black_count = np.count_nonzero(self.board == BLACK)
+        white_count = np.count_nonzero(self.board == WHITE)
+        return black_count, white_count
 
     def get_winner(self) -> Tuple[Optional[int], int, int]:
         """

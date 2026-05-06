@@ -12,7 +12,7 @@ import torch
 from typing import Dict, Tuple
 from game.othello import OthelloGame, BLACK, WHITE
 from ai.model import OthelloNet
-from ai.mcts import MCTS
+from ai.mcts_batched import BatchedMCTS
 
 
 def play_match(
@@ -24,7 +24,7 @@ def play_match(
     device: str = 'cpu',
 ) -> Dict[str, int]:
     """
-    Play a match between two models.
+    Play a match between two models using batched MCTS.
 
     Args:
         model_a: First model
@@ -38,8 +38,8 @@ def play_match(
         Dictionary with match results:
         {'model_a_wins': int, 'model_b_wins': int, 'draws': int}
     """
-    mcts_a = MCTS(model_a, num_simulations=num_simulations)
-    mcts_b = MCTS(model_b, num_simulations=num_simulations)
+    mcts_a = BatchedMCTS(model_a, num_simulations=num_simulations, batch_size=16)
+    mcts_b = BatchedMCTS(model_b, num_simulations=num_simulations, batch_size=16)
 
     results = {'model_a_wins': 0, 'model_b_wins': 0, 'draws': 0}
 

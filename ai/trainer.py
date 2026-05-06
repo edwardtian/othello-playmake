@@ -2,7 +2,7 @@
 Training loop and replay buffer for Othello AI.
 
 Implements:
-  - ReplayBuffer: stores self-play game positions
+  - ReplayBuffer: stores self-play game positions with O(1) sampling
   - Trainer: orchestrates self-play generation and network training
 """
 
@@ -15,7 +15,6 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from typing import List, Tuple, Optional, Dict
-from collections import deque
 
 from ai.model import OthelloNet
 from ai.mcts import MCTS
@@ -26,23 +25,29 @@ from game.othello import OthelloGame
 class ReplayBuffer:
     """
     Circular replay buffer for self-play training data.
-    Stores individual (state, policy, value) tuples.
+    Uses pre-allocated numpy arrays for O(1) random access sampling.
     """
 
     def __init__(self, capacity: int = 500_000):
         self.capacity = capacity
-        self.states = deque(maxlen=capacity)
-        self.policies = deque(maxlen=capacity)
-        self.values = deque(maxlen=capacity)
+        self.size = 0
+        self.pos = 0
+        # Pre-allocate arrays for O(1) random access
+        self.states = np.zeros((capacity, 3, 8, 8), dtype=np.float32)
+        self.policies = np.zeros((capacity, 65), dtype=np.float32)
+        self.values = np.zeros(capacity, dtype=np.float32)
 
     def __len__(self) -> int:
-        return len(self.states)
+        return self.size
 
     def add(self, state: np.ndarray, policy: np.ndarray, value: float):
         """Add a single training example."""
-        self.states.append(state)
-        self.policies.append(policy)
-        self.values.append(value)
+        idx = self.pos
+        self.states[idx] = state
+        self.policies[idx] = policy
+        self.values[idx] = value
+        self.pos = (self.pos + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
 
     def add_game(self, game_data: List[Tuple[np.ndarray, np.ndarray, int, float]]):
         """Add all positions from a self-play game."""
@@ -61,41 +66,47 @@ class ReplayBuffer:
         if len(self) < batch_size:
             batch_size = len(self)
 
-        indices = np.random.choice(len(self), size=batch_size, replace=False)
-
-        states = np.stack([self.states[i] for i in indices])
-        policies = np.stack([self.policies[i] for i in indices])
-        values = np.array([self.values[i] for i in indices], dtype=np.float32).reshape(-1, 1)
+        indices = np.random.randint(0, self.size, size=batch_size)
 
         return (
-            torch.from_numpy(states).to(device),
-            torch.from_numpy(policies).to(device),
-            torch.from_numpy(values).to(device),
+            torch.from_numpy(self.states[indices]).to(device),
+            torch.from_numpy(self.policies[indices]).to(device),
+            torch.from_numpy(self.values[indices].reshape(-1, 1)).to(device),
         )
 
     def save(self, path: str):
         """Save buffer to disk."""
         data = {
-            'states': np.array(self.states),
-            'policies': np.array(self.policies),
-            'values': np.array(self.values),
+            'states': self.states[:self.size],
+            'policies': self.policies[:self.size],
+            'values': self.values[:self.size],
+            'size': self.size,
+            'pos': self.pos,
         }
         torch.save(data, path, pickle_protocol=5)
 
     def load(self, path: str):
         """Load buffer from disk."""
         data = torch.load(path, map_location='cpu', weights_only=False)
-        self.states = deque(maxlen=self.capacity)
-        self.policies = deque(maxlen=self.capacity)
-        self.values = deque(maxlen=self.capacity)
-        for s, p, v in zip(data['states'], data['policies'], data['values']):
-            self.add(s, p, float(v))
+        loaded_size = data.get('size', len(data['states']))
+        loaded_pos = data.get('pos', loaded_size % self.capacity)
+        
+        self.size = min(loaded_size, self.capacity)
+        self.pos = loaded_pos % self.capacity
+        
+        states_arr = data['states']
+        policies_arr = data['policies']
+        values_arr = data['values']
+        
+        n = min(len(states_arr), self.capacity)
+        self.states[:n] = states_arr[:n]
+        self.policies[:n] = policies_arr[:n]
+        self.values[:n] = values_arr[:n]
 
     def clear(self):
         """Clear all data."""
-        self.states.clear()
-        self.policies.clear()
-        self.values.clear()
+        self.size = 0
+        self.pos = 0
 
 
 class Trainer:
@@ -144,7 +155,7 @@ class Trainer:
             Dictionary of loss metrics.
         """
         if len(self.replay_buffer) < self.batch_size:
-            return {'policy_loss': 0.0, 'value_loss': 0.0, 'total_loss': 0.0}
+            return {'policy_loss': 0.0, 'value_loss': 0.0, 'total_loss': 0.0, 'lr': self.scheduler.get_last_lr()[0]}
 
         states, target_policies, target_values = self.replay_buffer.sample(self.batch_size, self.device)
 
