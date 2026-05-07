@@ -28,12 +28,13 @@ class ReplayBuffer:
     Uses pre-allocated numpy arrays for O(1) random access sampling.
     """
 
-    def __init__(self, capacity: int = 500_000, action_size: int = 65):
+    def __init__(self, capacity: int = 500_000, action_size: int = 65, board_size: int = 8):
         self.capacity = capacity
         self.size = 0
         self.pos = 0
+        self.board_size = board_size
         # Pre-allocate arrays for O(1) random access
-        self.states = np.zeros((capacity, 3, 8, 8), dtype=np.float32)
+        self.states = np.zeros((capacity, 3, board_size, board_size), dtype=np.float32)
         self.policies = np.zeros((capacity, action_size), dtype=np.float32)
         self.values = np.zeros(capacity, dtype=np.float32)
 
@@ -59,8 +60,8 @@ class ReplayBuffer:
         Sample a random batch from the buffer.
 
         Returns:
-            states: (B, 3, 8, 8) float32 tensor
-            policies: (B, 65) float32 tensor
+            states: (B, 3, board_size, board_size) float32 tensor
+            policies: (B, action_size) float32 tensor
             values: (B, 1) float32 tensor
         """
         if len(self) < batch_size:

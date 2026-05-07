@@ -1,0 +1,286 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: #eee;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 20px;
+}
+
+.container {
+    max-width: 700px;
+    width: 100%;
+    text-align: center;
+}
+
+header {
+    margin-bottom: 15px;
+}
+
+header h1 {
+    font-size: 1.8rem;
+    color: #00d4ff;
+    margin-bottom: 5px;
+}
+
+.subtitle {
+    color: #888;
+    font-size: 0.9rem;
+}
+
+.game-controls {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.mode-selector {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.checkpoint-selector {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.checkpoint-selector select,
+.mode-selector select {
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #444;
+    background: #222;
+    color: #eee;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.btn {
+    padding: 7px 14px;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn.primary {
+    background: #00d4ff;
+    color: #1a1a2e;
+    font-weight: bold;
+}
+
+.btn.primary:hover {
+    background: #33ddff;
+}
+
+.btn.secondary {
+    background: #444;
+    color: #eee;
+}
+
+.btn.secondary:hover:not(:disabled) {
+    background: #555;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.game-info {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    margin-bottom: 12px;
+    padding: 8px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 8px;
+}
+
+.score {
+    font-size: 1rem;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.black-dot, .white-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.black-dot {
+    background: #111;
+    border: 2px solid #333;
+}
+
+.white-dot {
+    background: #eee;
+    border: 2px solid #ccc;
+}
+
+.turn-indicator {
+    font-size: 0.95rem;
+    color: #aaa;
+}
+
+#turnIndicator {
+    font-weight: bold;
+    color: #00d4ff;
+}
+
+/* 15x15 Gomoku board */
+.board {
+    display: grid;
+    grid-template-columns: repeat(15, 1fr);
+    gap: 1px;
+    background: #8B6914;
+    padding: 6px;
+    border-radius: 6px;
+    margin: 0 auto;
+    max-width: 600px;
+    aspect-ratio: 1;
+}
+
+.cell {
+    background: #DEB887;
+    border-radius: 2px;
+    cursor: pointer;
+    position: relative;
+    aspect-ratio: 1;
+    transition: background 0.15s;
+}
+
+.cell:hover {
+    background: #F5DEB3;
+}
+
+.cell.legal-move::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 25%;
+    height: 25%;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.15);
+}
+
+.cell .piece {
+    position: absolute;
+    top: 6%;
+    left: 6%;
+    width: 88%;
+    height: 88%;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+}
+
+.cell .piece.black {
+    background: radial-gradient(circle at 35% 35%, #444, #111);
+    box-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+}
+
+.cell .piece.white {
+    background: radial-gradient(circle at 35% 35%, #fff, #ddd);
+    box-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+}
+
+.game-over {
+    margin-top: 12px;
+    padding: 12px;
+    background: rgba(0, 212, 255, 0.1);
+    border: 1px solid #00d4ff;
+    border-radius: 8px;
+}
+
+.game-over h2 {
+    color: #00d4ff;
+    font-size: 1.2rem;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.thinking-panel {
+    margin-top: 15px;
+    padding: 12px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 8px;
+}
+
+.thinking-panel h3 {
+    margin-bottom: 8px;
+    color: #00d4ff;
+    font-size: 1rem;
+}
+
+.thinking-map {
+    display: grid;
+    grid-template-columns: repeat(15, 1fr);
+    gap: 1px;
+    max-width: 400px;
+    margin: 0 auto 8px;
+}
+
+.thinking-cell {
+    aspect-ratio: 1;
+    border-radius: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.55rem;
+    color: rgba(255,255,255,0.8);
+}
+
+.thinking-value {
+    font-size: 0.85rem;
+    color: #aaa;
+}
+
+@media (max-width: 640px) {
+    .board {
+        max-width: 95vw;
+        padding: 4px;
+        gap: 1px;
+    }
+
+    .cell .piece {
+        top: 4%;
+        left: 4%;
+        width: 92%;
+        height: 92%;
+    }
+
+    .thinking-map {
+        max-width: 95vw;
+    }
+
+    .game-controls {
+        gap: 6px;
+    }
+
+    .btn {
+        padding: 6px 10px;
+        font-size: 0.8rem;
+    }
+}

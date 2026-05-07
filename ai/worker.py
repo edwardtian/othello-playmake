@@ -9,6 +9,7 @@ import time
 import numpy as np
 import torch
 import torch.multiprocessing as mp
+from queue import Full
 from typing import List, Tuple, Dict, Any
 from game.othello import OthelloGame
 from ai.mcts_batched import BatchedMCTS
@@ -126,6 +127,7 @@ class SelfPlayWorker:
         mcts_config: Dict[str, Any],
         temperature_schedule: List[Tuple[int, float]] = None,
         action_size: int = 65,
+        game_class=None,
     ):
         self.worker_id = worker_id
         self.request_queue = request_queue
@@ -134,6 +136,7 @@ class SelfPlayWorker:
         self.mcts_config = mcts_config
         self.temperature_schedule = temperature_schedule or [(0, 1.0)]
         self.action_size = action_size
+        self.game_class = game_class or OthelloGame
 
     def _get_temperature(self, move_count: int) -> float:
         """Get temperature for current move count."""
@@ -171,19 +174,24 @@ class SelfPlayWorker:
         while num_games is None or games_played < num_games:
             try:
                 game_data = self._play_one_game(mcts)
-                self.game_queue.put(game_data, block=True, timeout=30)
-                games_played += 1
+                try:
+                    self.game_queue.put_nowait(game_data)
+                    games_played += 1
+                except Full:
+                    # Queue is full (main process busy), drop game and continue
+                    pass
 
                 if games_played % 10 == 0:
                     print(f"[Worker {self.worker_id}] Played {games_played} games")
 
             except Exception as e:
-                print(f"[Worker {self.worker_id}] Error: {e}")
+                msg = str(e) or type(e).__name__
+                print(f"[Worker {self.worker_id}] Error: {msg}")
                 time.sleep(1)
 
     def _play_one_game(self, mcts: BatchedMCTS) -> List[Tuple]:
         """Play one complete self-play game."""
-        game = OthelloGame()
+        game = self.game_class()
         game_history = []
         move_count = 0
 
@@ -223,6 +231,7 @@ def start_worker_pool(
     game_queue: mp.Queue,
     mcts_config: Dict[str, Any],
     action_size: int = 65,
+    game_class=None,
 ) -> List[mp.Process]:
     """
     Start a pool of self-play workers.
@@ -234,6 +243,7 @@ def start_worker_pool(
         game_queue: Queue for sending completed games back to main process
         mcts_config: MCTS configuration dict
         action_size: Number of possible actions
+        game_class: Game class to instantiate (default OthelloGame)
     
     Returns:
         List of worker processes
@@ -249,6 +259,7 @@ def start_worker_pool(
             game_queue=game_queue,
             mcts_config=mcts_config,
             action_size=action_size,
+            game_class=game_class,
         )
         p = ctx.Process(
             target=worker.run,

@@ -205,7 +205,7 @@ def main():
     }
 
     ctx = mp.get_context('spawn')
-    game_queue = ctx.Queue(maxsize=1000)
+    game_queue = ctx.Queue(maxsize=5000)
     
     worker_processes = start_worker_pool(
         num_workers=args.workers,

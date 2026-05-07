@@ -14,7 +14,6 @@ import math
 import numpy as np
 import torch
 from typing import Dict, List, Optional, Tuple
-from game.othello import PASS_ACTION, BLACK, WHITE
 
 
 class BatchedMCTSNode:

@@ -111,7 +111,7 @@ def main():
     model = create_model(**model_config, device=device)
     print(f"Model parameters: {model.count_parameters():,}")
 
-    replay_buffer = ReplayBuffer(capacity=args.buffer_capacity, action_size=action_size)
+    replay_buffer = ReplayBuffer(capacity=args.buffer_capacity, action_size=action_size, board_size=board_size)
     trainer = Trainer(
         model=model,
         mcts=None,
@@ -189,7 +189,7 @@ def main():
     }
 
     ctx = mp.get_context('spawn')
-    game_queue = ctx.Queue(maxsize=1000)
+    game_queue = ctx.Queue(maxsize=5000)
 
     worker_processes = start_worker_pool(
         num_workers=args.workers,
@@ -198,6 +198,7 @@ def main():
         game_queue=game_queue,
         mcts_config=mcts_config,
         action_size=action_size,
+        game_class=GomokuGame,
     )
 
     # Training loop
