@@ -77,7 +77,8 @@ class GameSession:
         """Return current game state as JSON-serializable dict."""
         board = self.game.get_board_state().tolist()
         legal_moves = self.game.get_legal_moves()
-        winner, black_count, white_count = self.game.get_winner()
+        winner, _, _ = self.game.get_winner()
+        black_count, white_count = self.game.count_pieces()
 
         return {
             'session_id': self.session_id,

@@ -23,6 +23,7 @@ class OthelloApp {
         this.boardEl = document.getElementById('board');
         this.newGameBtn = document.getElementById('newGameBtn');
         this.aiMoveBtn = document.getElementById('aiMoveBtn');
+        this.passBtn = document.getElementById('passBtn');
         this.gameModeSelect = document.getElementById('gameMode');
         this.blackScoreEl = document.getElementById('blackScore');
         this.whiteScoreEl = document.getElementById('whiteScore');
@@ -39,6 +40,7 @@ class OthelloApp {
     initEventListeners() {
         this.newGameBtn.addEventListener('click', () => this.newGame());
         this.aiMoveBtn.addEventListener('click', () => this.requestAIMove());
+        this.passBtn.addEventListener('click', () => this.makeMove(64));
         this.loadCheckpointBtn.addEventListener('click', () => this.loadCheckpoint());
         this.gameModeSelect.addEventListener('change', (e) => {
             this.mode = e.target.value;
@@ -142,6 +144,12 @@ class OthelloApp {
             return;
         }
 
+        // Don't allow board clicks when pass is the only move
+        const legalMoves = this.lastState?.legal_moves || [];
+        if (legalMoves.length === 1 && legalMoves[0] === 64) {
+            return;
+        }
+
         await this.makeMove(action);
     }
 
@@ -170,6 +178,13 @@ class OthelloApp {
             } else if (this.mode === 'ai-vs-ai') {
                 // Auto-play next AI move
                 setTimeout(() => this.requestAIMove(), 500);
+            } else if (this.mode !== 'ai-vs-ai' && data.current_player === this.humanColor) {
+                // It's still human's turn (opponent passed) - check if human must pass too
+                const legalMoves = data.legal_moves || [];
+                if (legalMoves.length === 1 && legalMoves[0] === 64) {
+                    // Human must pass - auto-pass after short delay
+                    setTimeout(() => this.makeMove(64), 800);
+                }
             }
         } catch (err) {
             console.error('Move failed:', err);
@@ -178,6 +193,14 @@ class OthelloApp {
 
     async requestAIMove() {
         if (this.isGameOver || this.isThinking || !this.sessionId) return;
+
+        // Check if AI must pass
+        const legalMoves = this.lastState?.legal_moves || [];
+        if (legalMoves.length === 1 && legalMoves[0] === 64) {
+            console.log('[AI] No moves available, passing');
+            await this.makeMove(64);
+            return;
+        }
 
         this.isThinking = true;
         this.aiMoveBtn.disabled = true;
@@ -204,6 +227,18 @@ class OthelloApp {
                 this.showGameOver(data);
             } else if (this.mode === 'ai-vs-ai') {
                 setTimeout(() => this.requestAIMove(), 500);
+            } else if (this.mode !== 'ai-vs-ai' && data.current_player !== this.humanColor) {
+                // AI gets another turn (human passed) - check if AI must pass too
+                const aiLegalMoves = data.legal_moves || [];
+                if (aiLegalMoves.length === 1 && aiLegalMoves[0] === 64) {
+                    setTimeout(() => this.requestAIMove(), 500);
+                }
+            } else if (this.mode !== 'ai-vs-ai' && data.current_player === this.humanColor) {
+                // Back to human - check if human must pass
+                const humanLegalMoves = data.legal_moves || [];
+                if (humanLegalMoves.length === 1 && humanLegalMoves[0] === 64) {
+                    setTimeout(() => this.makeMove(64), 800);
+                }
             }
         } catch (err) {
             console.error('AI move failed:', err);
@@ -217,6 +252,7 @@ class OthelloApp {
         this.lastState = state;
         const board = state.board;
         const legalMoves = state.legal_moves || [];
+        const mustPass = legalMoves.length === 1 && legalMoves[0] === 64;
 
         // Update board
         const cells = this.boardEl.querySelectorAll('.cell');
@@ -239,7 +275,7 @@ class OthelloApp {
                 cell.appendChild(piece);
             }
 
-            if (legalMoves.includes(action)) {
+            if (legalMoves.includes(action) && !mustPass) {
                 cell.classList.add('legal-move');
             }
         });
@@ -251,11 +287,20 @@ class OthelloApp {
         // Update turn
         const turnText = state.current_player === BLACK ? 'Black' : 'White';
         this.turnIndicatorEl.textContent = turnText;
+
+        // Show/hide pass button
+        const isHumanTurn = this.mode !== 'ai-vs-ai' && state.current_player === this.humanColor;
+        if (mustPass && isHumanTurn && !state.is_game_over) {
+            this.passBtn.classList.remove('hidden');
+        } else {
+            this.passBtn.classList.add('hidden');
+        }
     }
 
     updateControls(state) {
         if (!state) return;
-        this.aiMoveBtn.disabled = this.isThinking || state.is_game_over || this.mode === 'ai-vs-ai';
+        const mustPass = state.legal_moves?.length === 1 && state.legal_moves[0] === 64;
+        this.aiMoveBtn.disabled = this.isThinking || state.is_game_over || this.mode === 'ai-vs-ai' || mustPass;
     }
 
     getCurrentPlayerFromUI() {
