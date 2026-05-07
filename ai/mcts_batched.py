@@ -14,7 +14,7 @@ import math
 import numpy as np
 import torch
 from typing import Dict, List, Optional, Tuple
-from game.othello import OthelloGame, PASS_ACTION, BOARD_SIZE, BLACK, WHITE
+from game.othello import PASS_ACTION, BLACK, WHITE
 
 
 class BatchedMCTSNode:
@@ -118,6 +118,7 @@ class BatchedMCTS:
         dirichlet_alpha: float = 0.3,
         dirichlet_epsilon: float = 0.25,
         virtual_loss: float = 1.0,
+        action_size: int = None,
     ):
         self.model = model
         self.evaluator = evaluator
@@ -127,6 +128,7 @@ class BatchedMCTS:
         self.dirichlet_alpha = dirichlet_alpha
         self.dirichlet_epsilon = dirichlet_epsilon
         self.virtual_loss = virtual_loss
+        self.action_size = action_size or getattr(model, 'action_size', 65)
 
     def _evaluate_batch(self, states: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -152,7 +154,7 @@ class BatchedMCTS:
         return policies, values
 
     @torch.no_grad()
-    def search(self, game: OthelloGame, temperature: float = 1.0) -> Tuple[np.ndarray, np.ndarray]:
+    def search(self, game: object, temperature: float = 1.0) -> Tuple[np.ndarray, np.ndarray]:
         """
         Run batched MCTS from the given game state.
 
@@ -270,7 +272,7 @@ class BatchedMCTS:
                         search_game.make_move(action)
 
                     leaf_valid = search_game.get_legal_moves()
-                    masked_leaf = np.zeros(65, dtype=np.float32)
+                    masked_leaf = np.zeros(self.action_size, dtype=np.float32)
                     masked_leaf[leaf_valid] = leaf_policies[idx][leaf_valid]
                     psum = masked_leaf.sum()
                     if psum > 0:
@@ -295,7 +297,7 @@ class BatchedMCTS:
                     n.remove_virtual_loss(self.virtual_loss)
 
         # Extract visit counts for root children
-        action_probs = np.zeros(BOARD_SIZE * BOARD_SIZE + 1, dtype=np.float32)
+        action_probs = np.zeros(self.action_size, dtype=np.float32)
         for action, child in root.children.items():
             action_probs[action] = child.visit_count
 
@@ -314,7 +316,7 @@ class BatchedMCTS:
 
         return action_probs, np.array([root_value], dtype=np.float32)
 
-    def get_best_move(self, game: OthelloGame, temperature: float = 0.0) -> int:
+    def get_best_move(self, game: object, temperature: float = 0.0) -> int:
         """Run MCTS and return the best action."""
         action_probs, _ = self.search(game, temperature=temperature)
         return int(np.argmax(action_probs))

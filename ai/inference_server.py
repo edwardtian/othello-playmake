@@ -29,12 +29,14 @@ class InferenceServer:
         max_batch_size: int = 64,
         max_wait_ms: float = 5.0,
         use_fp16: bool = False,
+        action_size: int = 65,
     ):
         self.model_config = model_config
         self.device = device
         self.max_batch_size = max_batch_size
         self.max_wait_ms = max_wait_ms
         self.use_fp16 = use_fp16 and device.startswith('cuda')
+        self.action_size = action_size
         self.model = None
         self.stats = {
             'batches_processed': 0,
@@ -99,7 +101,7 @@ class InferenceServer:
                 result_queue = result_queues[worker_id] if worker_id < len(result_queues) else result_queues[0]
                 result_queue.put({
                     'request_id': req['request_id'],
-                    'policy': np.ones(65, dtype=np.float32) / 65,
+                    'policy': np.ones(self.action_size, dtype=np.float32) / self.action_size,
                     'value': 0.0,
                 })
 
@@ -178,6 +180,7 @@ def start_inference_server(
     device: str = 'cpu',
     max_batch_size: int = 64,
     use_fp16: bool = False,
+    action_size: int = 65,
 ) -> Tuple[mp.Process, mp.Queue, List[mp.Queue], mp.Queue]:
     """
     Start inference server in a background process.
@@ -188,6 +191,7 @@ def start_inference_server(
         device: Device to run model on
         max_batch_size: Maximum batch size for inference
         use_fp16: Use FP16 mixed-precision for inference (GPU only)
+        action_size: Number of possible actions
     
     Returns:
         (process, request_queue, result_queues, control_queue)
@@ -198,7 +202,7 @@ def start_inference_server(
     result_queues = [ctx.Queue(maxsize=1024) for _ in range(num_workers)]
     control_queue = ctx.Queue(maxsize=16)
 
-    server = InferenceServer(model_config, device, max_batch_size, use_fp16=use_fp16)
+    server = InferenceServer(model_config, device, max_batch_size, use_fp16=use_fp16, action_size=action_size)
     process = ctx.Process(
         target=server.run,
         args=(request_queue, result_queues, control_queue),

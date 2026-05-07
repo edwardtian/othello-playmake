@@ -12,7 +12,7 @@ import math
 import numpy as np
 import torch
 from typing import Dict, List, Optional, Tuple
-from game.othello import OthelloGame, PASS_ACTION, BOARD_SIZE
+from game.othello import PASS_ACTION
 
 
 class MCTSNode:
@@ -94,15 +94,17 @@ class MCTS:
         c_puct: float = 1.5,
         dirichlet_alpha: float = 0.3,
         dirichlet_epsilon: float = 0.25,
+        action_size: int = None,
     ):
         self.model = model
         self.num_simulations = num_simulations
         self.c_puct = c_puct
         self.dirichlet_alpha = dirichlet_alpha
         self.dirichlet_epsilon = dirichlet_epsilon
+        self.action_size = action_size or getattr(model, 'action_size', 65)
 
     @torch.no_grad()
-    def search(self, game: OthelloGame, temperature: float = 1.0) -> Tuple[np.ndarray, np.ndarray]:
+    def search(self, game: object, temperature: float = 1.0) -> Tuple[np.ndarray, np.ndarray]:
         """
         Run MCTS from the given game state.
         
@@ -205,7 +207,7 @@ class MCTS:
                 # Note: backup already handles negation recursively
 
         # Extract visit counts for root children
-        action_probs = np.zeros(BOARD_SIZE * BOARD_SIZE + 1, dtype=np.float32)
+        action_probs = np.zeros(self.action_size, dtype=np.float32)
         for action, child in root.children.items():
             action_probs[action] = child.visit_count
 
@@ -227,7 +229,7 @@ class MCTS:
 
         return action_probs, np.array([root_value], dtype=np.float32)
 
-    def get_best_move(self, game: OthelloGame, temperature: float = 0.0) -> int:
+    def get_best_move(self, game: object, temperature: float = 0.0) -> int:
         """Run MCTS and return the best action."""
         action_probs, _ = self.search(game, temperature=temperature)
         return int(np.argmax(action_probs))

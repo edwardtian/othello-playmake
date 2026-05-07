@@ -35,20 +35,21 @@ class ResidualBlock(nn.Module):
 
 class OthelloNet(nn.Module):
     """
-    AlphaZero-style policy-value network for Othello.
+    AlphaZero-style policy-value network.
     
     Args:
         num_blocks: Number of residual blocks in the backbone.
         num_channels: Number of channels in residual blocks.
         board_size: Size of the board (default 8).
+        action_size: Number of possible actions (default board_size^2 + 1 for pass).
     """
 
-    def __init__(self, num_blocks: int = 20, num_channels: int = 256, board_size: int = 8):
+    def __init__(self, num_blocks: int = 20, num_channels: int = 256, board_size: int = 8, action_size: int = None):
         super().__init__()
         self.board_size = board_size
         self.num_blocks = num_blocks
         self.num_channels = num_channels
-        self.action_size = board_size * board_size + 1  # 64 squares + pass
+        self.action_size = action_size if action_size is not None else board_size * board_size + 1
 
         # Initial convolution
         self.conv_initial = nn.Conv2d(3, num_channels, kernel_size=3, padding=1, bias=False)
@@ -140,8 +141,8 @@ class OthelloNet(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
-def create_model(num_blocks: int = 20, num_channels: int = 256, device: str = 'cuda') -> OthelloNet:
+def create_model(num_blocks: int = 20, num_channels: int = 256, board_size: int = 8, action_size: int = None, device: str = 'cuda') -> OthelloNet:
     """Create model and move to device."""
-    model = OthelloNet(num_blocks=num_blocks, num_channels=num_channels)
+    model = OthelloNet(num_blocks=num_blocks, num_channels=num_channels, board_size=board_size, action_size=action_size)
     model.to(device)
     return model

@@ -14,6 +14,7 @@ from ai.mcts import MCTS
 
 def generate_self_play_game(
     mcts: MCTS,
+    game=None,
     temperature_threshold: int = 30,
     temperature_init: float = 1.0,
     temperature_final: float = 0.0,
@@ -23,16 +24,17 @@ def generate_self_play_game(
 
     Args:
         mcts: MCTS instance with a neural network
+        game: Game instance (default: new OthelloGame)
         temperature_threshold: Number of moves before switching to argmax
         temperature_init: Temperature for first moves (exploration)
         temperature_final: Temperature after threshold (exploitation)
 
     Returns:
         List of (state_planes, mcts_policy, action, outcome) tuples.
-        Outcome is from the perspective of the current player at that state:
-        +1 = win, -1 = loss, 0 = draw
     """
-    game = OthelloGame()
+    if game is None:
+        from game.othello import OthelloGame
+        game = OthelloGame()
     game_history = []
     move_count = 0
 

@@ -28,13 +28,13 @@ class ReplayBuffer:
     Uses pre-allocated numpy arrays for O(1) random access sampling.
     """
 
-    def __init__(self, capacity: int = 500_000):
+    def __init__(self, capacity: int = 500_000, action_size: int = 65):
         self.capacity = capacity
         self.size = 0
         self.pos = 0
         # Pre-allocate arrays for O(1) random access
         self.states = np.zeros((capacity, 3, 8, 8), dtype=np.float32)
-        self.policies = np.zeros((capacity, 65), dtype=np.float32)
+        self.policies = np.zeros((capacity, action_size), dtype=np.float32)
         self.values = np.zeros(capacity, dtype=np.float32)
 
     def __len__(self) -> int:
@@ -126,6 +126,7 @@ class Trainer:
         num_simulations: int = 400,
         checkpoint_dir: str = 'data/checkpoints',
         log_dir: str = 'data/logs',
+        action_size: int = 65,
     ):
         self.model = model.to(device)
         self.mcts = mcts

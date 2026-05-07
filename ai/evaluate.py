@@ -22,6 +22,7 @@ def play_match(
     num_simulations: int = 400,
     temperature: float = 0.0,
     device: str = 'cpu',
+    game_class=None,
 ) -> Dict[str, int]:
     """
     Play a match between two models using batched MCTS.
@@ -33,11 +34,16 @@ def play_match(
         num_simulations: MCTS simulations per move
         temperature: Temperature for move selection (0 = argmax)
         device: Device to run models on
+        game_class: Game class to instantiate (default: OthelloGame)
 
     Returns:
         Dictionary with match results:
         {'model_a_wins': int, 'model_b_wins': int, 'draws': int}
     """
+    if game_class is None:
+        from game.othello import OthelloGame
+        game_class = OthelloGame
+
     mcts_a = BatchedMCTS(model_a, num_simulations=num_simulations, batch_size=16)
     mcts_b = BatchedMCTS(model_b, num_simulations=num_simulations, batch_size=16)
 
@@ -45,7 +51,7 @@ def play_match(
 
     # Play half the games with model_a as black, half with model_a as white
     for game_idx in range(num_games):
-        game = OthelloGame()
+        game = game_class()
 
         # Alternate colors
         if game_idx % 2 == 0:
@@ -89,6 +95,7 @@ def evaluate_challenger(
     num_simulations: int = 400,
     win_threshold: float = 0.55,
     device: str = 'cpu',
+    game_class=None,
 ) -> Tuple[bool, Dict]:
     """
     Evaluate if challenger should replace champion.
@@ -103,6 +110,7 @@ def evaluate_challenger(
         num_games=num_games,
         num_simulations=num_simulations,
         device=device,
+        game_class=game_class,
     )
 
     total = results['model_a_wins'] + results['model_b_wins'] + results['draws']
