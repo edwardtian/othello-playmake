@@ -111,7 +111,13 @@ def main():
     print(f"=" * 60)
     print(f"Othello AI Fast Training")
     print(f"=" * 60)
+    # Detect multi-GPU setup
+    num_gpus = torch.cuda.device_count() if device == 'cuda' else 0
+    use_dual_gpu = num_gpus >= 2
+
     print(f"Device: {device}")
+    if use_dual_gpu:
+        print(f"GPUs: {num_gpus} detected (dual inference server mode)")
     print(f"Model: {args.num_blocks} blocks, {args.num_channels} channels")
     print(f"Workers: {args.workers}")
     print(f"MCTS sims: {args.num_simulations}, batch: {args.mcts_batch_size}")
@@ -176,25 +182,10 @@ def main():
         initial_sims = args.num_simulations
         print(f"MCTS simulations: {initial_sims} (fixed)")
 
-    # Start inference server
-    print("\n[1/4] Starting inference server...")
-    server_process, request_queue, result_queues, control_queue = start_inference_server(
-        model_config=model_config,
-        num_workers=args.workers,
-        device=device,
-        max_batch_size=args.inference_batch_size,
-        use_fp16=args.fp16,
-    )
+    # Create shared game queue and MCTS config
+    ctx = mp.get_context('spawn')
+    game_queue = ctx.Queue(maxsize=5000)
 
-    # Send initial weights to inference server
-    control_queue.put({
-        'type': 'update_weights',
-        'state_dict': model.state_dict(),
-    })
-    time.sleep(1)
-
-    # Start worker pool
-    print("\n[2/4] Starting worker pool...")
     mcts_config = {
         'evaluator': None,  # Set by worker
         'num_simulations': initial_sims,
@@ -204,16 +195,82 @@ def main():
         'dirichlet_epsilon': 0.25,
     }
 
-    ctx = mp.get_context('spawn')
-    game_queue = ctx.Queue(maxsize=5000)
-    
-    worker_processes = start_worker_pool(
-        num_workers=args.workers,
-        request_queue=request_queue,
-        result_queues=result_queues,
-        game_queue=game_queue,
-        mcts_config=mcts_config,
-    )
+    if use_dual_gpu:
+        # Start dual inference servers
+        print("\n[1/4] Starting dual inference servers...")
+        workers_per_gpu = args.workers // 2
+        workers_gpu0 = workers_per_gpu
+        workers_gpu1 = args.workers - workers_per_gpu
+
+        server_process_0, request_queue_0, result_queues_0, control_queue_0 = start_inference_server(
+            model_config=model_config,
+            num_workers=workers_gpu0,
+            device='cuda:0',
+            max_batch_size=args.inference_batch_size,
+            use_fp16=args.fp16,
+        )
+        server_process_1, request_queue_1, result_queues_1, control_queue_1 = start_inference_server(
+            model_config=model_config,
+            num_workers=workers_gpu1,
+            device='cuda:1',
+            max_batch_size=args.inference_batch_size,
+            use_fp16=args.fp16,
+        )
+
+        # Send initial weights to both servers
+        state_dict = model.state_dict()
+        control_queue_0.put({'type': 'update_weights', 'state_dict': state_dict})
+        control_queue_1.put({'type': 'update_weights', 'state_dict': state_dict})
+        time.sleep(1)
+
+        # Start dual worker pools
+        print("\n[2/4] Starting dual worker pools...")
+        worker_processes_0 = start_worker_pool(
+            num_workers=workers_gpu0,
+            request_queue=request_queue_0,
+            result_queues=result_queues_0,
+            game_queue=game_queue,
+            mcts_config=mcts_config,
+        )
+        worker_processes_1 = start_worker_pool(
+            num_workers=workers_gpu1,
+            request_queue=request_queue_1,
+            result_queues=result_queues_1,
+            game_queue=game_queue,
+            mcts_config=mcts_config,
+        )
+        worker_processes = worker_processes_0 + worker_processes_1
+        control_queues = [control_queue_0, control_queue_1]
+        server_processes = [server_process_0, server_process_1]
+    else:
+        # Start single inference server
+        print("\n[1/4] Starting inference server...")
+        server_process, request_queue, result_queues, control_queue = start_inference_server(
+            model_config=model_config,
+            num_workers=args.workers,
+            device=device,
+            max_batch_size=args.inference_batch_size,
+            use_fp16=args.fp16,
+        )
+
+        # Send initial weights to inference server
+        control_queue.put({
+            'type': 'update_weights',
+            'state_dict': model.state_dict(),
+        })
+        time.sleep(1)
+
+        # Start worker pool
+        print("\n[2/4] Starting worker pool...")
+        worker_processes = start_worker_pool(
+            num_workers=args.workers,
+            request_queue=request_queue,
+            result_queues=result_queues,
+            game_queue=game_queue,
+            mcts_config=mcts_config,
+        )
+        control_queues = [control_queue]
+        server_processes = [server_process]
 
     # Training loop
     print("\n[3/4] Starting training loop...")
@@ -262,12 +319,14 @@ def main():
                         )
                         print(log_line)
 
-                    # Weight sync to inference server
+                    # Weight sync to inference server(s)
                     if trainer.training_step - last_weight_sync >= args.weight_sync_interval:
-                        control_queue.put({
-                            'type': 'update_weights',
-                            'state_dict': model.state_dict(),
-                        })
+                        state_dict = model.state_dict()
+                        for ctrl_queue in control_queues:
+                            ctrl_queue.put({
+                                'type': 'update_weights',
+                                'state_dict': state_dict,
+                            })
                         last_weight_sync = trainer.training_step
 
                     # Checkpointing
@@ -334,17 +393,19 @@ def main():
         print("\n[4/4] Cleaning up...")
         trainer.save_checkpoint("final")
 
-        # Shutdown workers (they'll eventually notice the queue is closed)
+        # Shutdown workers
         for p in worker_processes:
             if p.is_alive():
                 p.terminate()
                 p.join(timeout=5)
 
-        # Shutdown inference server
-        control_queue.put({'type': 'shutdown'})
-        server_process.join(timeout=10)
-        if server_process.is_alive():
-            server_process.terminate()
+        # Shutdown inference server(s)
+        for ctrl_queue in control_queues:
+            ctrl_queue.put({'type': 'shutdown'})
+        for sp in server_processes:
+            sp.join(timeout=10)
+            if sp.is_alive():
+                sp.terminate()
 
         print("[Main] Training complete.")
 

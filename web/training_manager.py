@@ -157,6 +157,9 @@ class TrainingManager:
         from ai.worker import start_worker_pool
 
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        num_gpus = torch.cuda.device_count() if device == 'cuda' else 0
+        use_dual_gpu = num_gpus >= 2
+
         model_config = {'num_blocks': num_blocks, 'num_channels': num_channels}
 
         model = create_model(**model_config, device=device)
@@ -177,21 +180,7 @@ class TrainingManager:
         if load_champion(checkpoint_dir, champion_model, device):
             model.load_state_dict(champion_model.state_dict())
 
-        # Start inference server
-        server_process, request_queue, result_queues, control_queue = start_inference_server(
-            model_config=model_config,
-            num_workers=num_workers,
-            device=device,
-            max_batch_size=inference_batch_size,
-            use_fp16=use_fp16,
-        )
-        control_queue.put({
-            'type': 'update_weights',
-            'state_dict': model.state_dict(),
-        })
-        time.sleep(1)
-
-        # Start worker pool
+        # Create shared game queue and MCTS config
         ctx = mp.get_context('spawn')
         game_queue = ctx.Queue(maxsize=1000)
         mcts_config = {
@@ -201,13 +190,74 @@ class TrainingManager:
             'dirichlet_alpha': 0.3,
             'dirichlet_epsilon': 0.25,
         }
-        worker_processes = start_worker_pool(
-            num_workers=num_workers,
-            request_queue=request_queue,
-            result_queues=result_queues,
-            game_queue=game_queue,
-            mcts_config=mcts_config,
-        )
+
+        if use_dual_gpu:
+            # Start dual inference servers
+            workers_per_gpu = num_workers // 2
+            workers_gpu0 = workers_per_gpu
+            workers_gpu1 = num_workers - workers_per_gpu
+
+            server_process_0, request_queue_0, result_queues_0, control_queue_0 = start_inference_server(
+                model_config=model_config,
+                num_workers=workers_gpu0,
+                device='cuda:0',
+                max_batch_size=inference_batch_size,
+                use_fp16=use_fp16,
+            )
+            server_process_1, request_queue_1, result_queues_1, control_queue_1 = start_inference_server(
+                model_config=model_config,
+                num_workers=workers_gpu1,
+                device='cuda:1',
+                max_batch_size=inference_batch_size,
+                use_fp16=use_fp16,
+            )
+
+            state_dict = model.state_dict()
+            control_queue_0.put({'type': 'update_weights', 'state_dict': state_dict})
+            control_queue_1.put({'type': 'update_weights', 'state_dict': state_dict})
+            time.sleep(1)
+
+            worker_processes_0 = start_worker_pool(
+                num_workers=workers_gpu0,
+                request_queue=request_queue_0,
+                result_queues=result_queues_0,
+                game_queue=game_queue,
+                mcts_config=mcts_config,
+            )
+            worker_processes_1 = start_worker_pool(
+                num_workers=workers_gpu1,
+                request_queue=request_queue_1,
+                result_queues=result_queues_1,
+                game_queue=game_queue,
+                mcts_config=mcts_config,
+            )
+            worker_processes = worker_processes_0 + worker_processes_1
+            control_queues = [control_queue_0, control_queue_1]
+            server_processes = [server_process_0, server_process_1]
+        else:
+            # Start single inference server
+            server_process, request_queue, result_queues, control_queue = start_inference_server(
+                model_config=model_config,
+                num_workers=num_workers,
+                device=device,
+                max_batch_size=inference_batch_size,
+                use_fp16=use_fp16,
+            )
+            control_queue.put({
+                'type': 'update_weights',
+                'state_dict': model.state_dict(),
+            })
+            time.sleep(1)
+
+            worker_processes = start_worker_pool(
+                num_workers=num_workers,
+                request_queue=request_queue,
+                result_queues=result_queues,
+                game_queue=game_queue,
+                mcts_config=mcts_config,
+            )
+            control_queues = [control_queue]
+            server_processes = [server_process]
 
         paused = False
         elo_history = []
@@ -284,12 +334,14 @@ class TrainingManager:
                             pass  # Queue full, drop metric and keep training
                         last_metrics_time = time.time()
 
-                    # Weight sync to inference server
+                    # Weight sync to inference server(s)
                     if trainer.training_step - last_weight_sync >= 100:
-                        control_queue.put({
-                            'type': 'update_weights',
-                            'state_dict': model.state_dict(),
-                        })
+                        state_dict = model.state_dict()
+                        for ctrl_queue in control_queues:
+                            ctrl_queue.put({
+                                'type': 'update_weights',
+                                'state_dict': state_dict,
+                            })
                         last_weight_sync = trainer.training_step
 
                     # Checkpointing
@@ -355,7 +407,12 @@ class TrainingManager:
             for p in worker_processes:
                 if p.is_alive():
                     p.terminate()
-            control_queue.put({'type': 'shutdown'})
+            for ctrl_queue in control_queues:
+                ctrl_queue.put({'type': 'shutdown'})
+            for sp in server_processes:
+                sp.join(timeout=10)
+                if sp.is_alive():
+                    sp.terminate()
             try:
                 metrics_queue.put_nowait({
                     'status': 'completed',
