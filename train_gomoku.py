@@ -66,6 +66,7 @@ def parse_args():
     parser.add_argument('--eval-interval', type=int, default=10000, help='Evaluate every N steps')
     parser.add_argument('--eval-games', type=int, default=100, help='Number of games for evaluation')
     parser.add_argument('--weight-sync-interval', type=int, default=100, help='Sync weights to inference server every N steps')
+    parser.add_argument('--fp16', action='store_true', help='Use FP16 mixed-precision for inference (GPU only)')
     parser.add_argument('--checkpoint-dir', type=str, default='data/gomoku_checkpoints', help='Checkpoint directory')
     parser.add_argument('--log-dir', type=str, default='data/gomoku_logs', help='Log directory')
     parser.add_argument('--device', type=str, default='auto', help='Device (auto/cpu/cuda)')
@@ -192,6 +193,7 @@ def main():
             device='cuda:0',
             max_batch_size=args.inference_batch_size,
             action_size=action_size,
+            use_fp16=args.fp16,
         )
         server_process_1, request_queue_1, result_queues_1, control_queue_1 = start_inference_server(
             model_config=model_config,
@@ -199,6 +201,7 @@ def main():
             device='cuda:1',
             max_batch_size=args.inference_batch_size,
             action_size=action_size,
+            use_fp16=args.fp16,
         )
 
         # Send initial weights to both servers
@@ -239,6 +242,7 @@ def main():
             device=device,
             max_batch_size=args.inference_batch_size,
             action_size=action_size,
+            use_fp16=args.fp16,
         )
 
         # Send initial weights to inference server
