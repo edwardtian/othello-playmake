@@ -231,6 +231,7 @@ class BatchedMCTS:
 
             # Evaluate batch of leaves
             leaf_states = []
+            leaf_games = []   # Cache game objects to avoid re-copying
             terminal_values = []
             terminal_mask = []
 
@@ -252,8 +253,10 @@ class BatchedMCTS:
                     terminal_values.append(val)
                     terminal_mask.append(True)
                     leaf_states.append(None)
+                    leaf_games.append(None)
                 else:
                     leaf_states.append(search_game.get_state_planes())
+                    leaf_games.append(search_game)   # Cache for expansion
                     terminal_values.append(0.0)
                     terminal_mask.append(False)
 
@@ -266,9 +269,7 @@ class BatchedMCTS:
                 # Expand leaf nodes and assign values
                 for idx, leaf_idx in enumerate(non_terminal_indices):
                     node = batch_nodes[leaf_idx]
-                    search_game = game.copy()
-                    for action in batch_games[leaf_idx]:
-                        search_game.make_move(action)
+                    search_game = leaf_games[leaf_idx]   # Reuse cached game
 
                     leaf_valid = search_game.get_legal_moves()
                     masked_leaf = np.zeros(self.action_size, dtype=np.float32)

@@ -87,6 +87,7 @@ def parse_args():
     parser.add_argument('--checkpoint-interval', type=int, default=5000, help='Checkpoint every N steps')
     parser.add_argument('--eval-interval', type=int, default=10000, help='Evaluate every N steps')
     parser.add_argument('--eval-games', type=int, default=100, help='Number of games for evaluation')
+    parser.add_argument('--eval-parallel', type=int, default=4, help='Number of parallel processes for evaluation')
     parser.add_argument('--weight-sync-interval', type=int, default=100, help='Sync weights to inference server every N steps')
     parser.add_argument('--checkpoint-dir', type=str, default='data/checkpoints', help='Checkpoint directory')
     parser.add_argument('--log-dir', type=str, default='data/logs', help='Log directory')
@@ -123,6 +124,7 @@ def main():
     print(f"MCTS sims: {args.num_simulations}, batch: {args.mcts_batch_size}")
     print(f"Training batch: {args.batch_size}")
     print(f"Checkpoint every: {args.checkpoint_interval} steps")
+    print(f"Eval parallel: {args.eval_parallel} processes")
     print(f"=" * 60)
 
     # Model config shared across components
@@ -339,13 +341,14 @@ def main():
                     # Evaluation
                     if trainer.training_step > 0 and trainer.training_step - last_eval >= args.eval_interval:
                         eval_sims = args.num_simulations or get_progressive_simulations(trainer.training_step)
-                        print(f"\n[Eval] Step {trainer.training_step}: Running {args.eval_games} games @ {eval_sims} sims...")
+                        print(f"\n[Eval] Step {trainer.training_step}: Running {args.eval_games} games @ {eval_sims} sims (parallel={args.eval_parallel})...")
                         is_better, eval_results = evaluate_challenger(
                             champion_model,
                             model,
                             num_games=args.eval_games,
                             num_simulations=eval_sims,
                             device=device,
+                            num_parallel=args.eval_parallel,
                         )
 
                         challenger_score = eval_results['challenger_win_rate']

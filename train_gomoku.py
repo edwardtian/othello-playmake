@@ -8,10 +8,29 @@ Architecture:
 
 Usage:
     python train_gomoku.py --steps 100000 --workers 16
+
+GPU Auto-Detection:
+    This script automatically adds conda CUDA 12.8 to PATH if needed.
+    Multiple GPUs are utilized via dual inference server mode.
 """
 
 import os
 import sys
+
+# Auto-detect and add conda CUDA 12.8 to PATH (for Windows)
+_conda_cuda_path = os.path.join(sys.prefix, 'Library', 'bin')
+if os.path.exists(os.path.join(_conda_cuda_path, 'cudart64_12.dll')):
+    if _conda_cuda_path not in os.environ.get('PATH', ''):
+        os.environ['PATH'] = _conda_cuda_path + ';' + os.environ.get('PATH', '')
+        print(f"[Setup] Added conda CUDA 12.8 to PATH: {_conda_cuda_path}")
+
+# Also check for cuDNN in user home
+_user_cudnn = os.path.expanduser('~/cuda/bin')
+if os.path.exists(os.path.join(_user_cudnn, 'cudnn64_9.dll')):
+    if _user_cudnn not in os.environ.get('PATH', ''):
+        os.environ['PATH'] = _user_cudnn + ';' + os.environ.get('PATH', '')
+        print(f"[Setup] Added cuDNN 9 to PATH: {_user_cudnn}")
+
 import time
 import argparse
 import glob
@@ -66,9 +85,10 @@ def parse_args():
     parser.add_argument('--eval-interval', type=int, default=10000, help='Evaluate every N steps')
     parser.add_argument('--eval-games', type=int, default=100, help='Number of games for evaluation')
     parser.add_argument('--weight-sync-interval', type=int, default=100, help='Sync weights to inference server every N steps')
-    parser.add_argument('--fp16', action='store_true', help='Use FP16 mixed-precision for inference (GPU only)')
     parser.add_argument('--checkpoint-dir', type=str, default='data/gomoku_checkpoints', help='Checkpoint directory')
     parser.add_argument('--log-dir', type=str, default='data/gomoku_logs', help='Log directory')
+    parser.add_argument('--fp16', action='store_true', help='Use FP16 mixed-precision for inference (GPU only)')
+    parser.add_argument('--eval-parallel', type=int, default=4, help='Number of parallel processes for evaluation')
     parser.add_argument('--device', type=str, default='auto', help='Device (auto/cpu/cuda)')
     parser.add_argument('--resume', action='store_true', help='Resume from latest checkpoint')
     return parser.parse_args()
@@ -112,6 +132,7 @@ def main():
     print(f"MCTS sims: {args.num_simulations}, batch: {args.mcts_batch_size}")
     print(f"Training batch: {args.batch_size}")
     print(f"Checkpoint every: {args.checkpoint_interval} steps")
+    print(f"Eval parallel: {args.eval_parallel} processes")
     print("=" * 60)
 
     # Create model and trainer
@@ -192,16 +213,16 @@ def main():
             num_workers=workers_gpu0,
             device='cuda:0',
             max_batch_size=args.inference_batch_size,
-            action_size=action_size,
             use_fp16=args.fp16,
+            action_size=action_size,
         )
         server_process_1, request_queue_1, result_queues_1, control_queue_1 = start_inference_server(
             model_config=model_config,
             num_workers=workers_gpu1,
             device='cuda:1',
             max_batch_size=args.inference_batch_size,
-            action_size=action_size,
             use_fp16=args.fp16,
+            action_size=action_size,
         )
 
         # Send initial weights to both servers
@@ -241,8 +262,8 @@ def main():
             num_workers=args.workers,
             device=device,
             max_batch_size=args.inference_batch_size,
-            action_size=action_size,
             use_fp16=args.fp16,
+            action_size=action_size,
         )
 
         # Send initial weights to inference server
@@ -333,7 +354,7 @@ def main():
                     # Evaluation
                     if trainer.training_step > 0 and trainer.training_step - last_eval >= args.eval_interval:
                         eval_sims = args.num_simulations or get_progressive_simulations(trainer.training_step)
-                        print(f"\n[Eval] Step {trainer.training_step}: Running {args.eval_games} games @ {eval_sims} sims...")
+                        print(f"\n[Eval] Step {trainer.training_step}: Running {args.eval_games} games @ {eval_sims} sims (parallel={args.eval_parallel})...")
                         is_better, eval_results = evaluate_challenger(
                             champion_model,
                             model,
@@ -341,6 +362,7 @@ def main():
                             num_simulations=eval_sims,
                             device=device,
                             game_class=GomokuGame,
+                            num_parallel=args.eval_parallel,
                         )
 
                         challenger_score = eval_results['challenger_win_rate']
