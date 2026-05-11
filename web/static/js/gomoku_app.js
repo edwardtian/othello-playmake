@@ -14,11 +14,15 @@ class GomokuApp {
         this.isGameOver = false;
         this.humanColor = BLACK;
         this.isThinking = false;
+        this.lastAiMove = null;          // Track last AI move for preferences
+        this.isSuggestingMove = false;   // True when user is suggesting a better move
+        this.moveCount = 0;
 
         this.initElements();
         this.initEventListeners();
         this.createBoard();
         this.refreshCheckpointList();
+        this.refreshPreferenceCount();
         this.newGame();
     }
 
@@ -37,6 +41,15 @@ class GomokuApp {
         this.thinkingValueEl = document.getElementById('thinkingValue');
         this.checkpointSelect = document.getElementById('checkpointSelect');
         this.loadCheckpointBtn = document.getElementById('loadCheckpointBtn');
+
+        // Preference UI elements
+        this.preferencePanelEl = document.getElementById('preferencePanel');
+        this.preferenceTextEl = document.getElementById('preferenceText');
+        this.thumbsUpBtn = document.getElementById('thumbsUpBtn');
+        this.suggestMoveBtn = document.getElementById('suggestMoveBtn');
+        this.badMoveBtn = document.getElementById('badMoveBtn');
+        this.preferenceStatusEl = document.getElementById('preferenceStatus');
+        this.prefCountEl = document.getElementById('prefCount');
     }
 
     initEventListeners() {
@@ -46,6 +59,49 @@ class GomokuApp {
         this.gameModeSelect.addEventListener('change', (e) => {
             this.mode = e.target.value;
             this.newGame();
+        });
+
+        // Preference buttons
+        this.thumbsUpBtn.addEventListener('click', () => this.submitPreference(null));
+        this.suggestMoveBtn.addEventListener('click', () => this.enterSuggestionMode());
+        this.badMoveBtn.addEventListener('click', () => this.submitBadMove());
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            const key = e.key.toLowerCase();
+
+            // Escape = exit suggestion mode
+            if (key === 'escape') {
+                e.preventDefault();
+                if (this.isSuggestingMove) {
+                    this.exitSuggestionMode();
+                }
+                return;
+            }
+
+            // N = New Game (always works)
+            if (key === 'n') {
+                e.preventDefault();
+                this.newGame();
+                return;
+            }
+
+            // Preference shortcuts only when panel is visible and not in suggestion mode
+            if (this.preferencePanelEl.classList.contains('hidden')) return;
+            if (this.isSuggestingMove) return;
+
+            if (key === 'g') {
+                e.preventDefault();
+                this.submitPreference(null);
+            } else if (key === 's') {
+                e.preventDefault();
+                this.enterSuggestionMode();
+            } else if (key === 'b') {
+                e.preventDefault();
+                this.submitBadMove();
+            }
         });
     }
 
@@ -68,8 +124,13 @@ class GomokuApp {
         this.humanColor = this.mode === 'human-white' ? WHITE : BLACK;
         this.isGameOver = false;
         this.isThinking = false;
+        this.lastAiMove = null;
+        this.isSuggestingMove = false;
+        this.moveCount = 0;
         this.hideThinking();
         this.hideGameOver();
+        this.hidePreferencePanel();
+        this.boardEl.classList.remove('suggestion-mode');
 
         try {
             const response = await fetch(`${API_BASE}/game/new`, {
@@ -138,6 +199,17 @@ class GomokuApp {
         if (this.isGameOver || this.isThinking) return;
 
         const action = row * BOARD_SIZE + col;
+
+        // Suggestion mode: submit preference and STAY in suggestion mode
+        // so user can suggest multiple better moves
+        if (this.isSuggestingMove) {
+            if (this.lastAiMove !== null && action !== this.lastAiMove) {
+                await this.submitPreference(action);
+                // Stay in suggestion mode — user can click another cell
+            }
+            return;
+        }
+
         const currentPlayer = this.getCurrentPlayerFromUI();
 
         // Only allow moves on human's turn
@@ -203,6 +275,16 @@ class GomokuApp {
                 this.showThinking(data.ai_move.thinking);
             }
 
+            // Track AI move for preference collection
+            if (data.ai_move) {
+                this.lastAiMove = data.ai_move.action;
+                this.moveCount++;
+                // Show preference panel for human-vs-AI modes
+                if (this.mode !== 'ai-vs-ai' && !data.is_game_over) {
+                    this.showPreferencePanel();
+                }
+            }
+
             if (data.is_game_over) {
                 this.showGameOver(data);
             } else if (this.mode === 'ai-vs-ai') {
@@ -213,6 +295,124 @@ class GomokuApp {
         } finally {
             this.isThinking = false;
             this.updateControls(this.lastState);
+        }
+    }
+
+    // Preference collection methods
+    showPreferencePanel() {
+        if (!this.preferencePanelEl) return;
+        this.preferencePanelEl.classList.remove('hidden');
+        this.preferenceTextEl.textContent = 'Was this a good move?';
+        this.preferenceStatusEl.textContent = '';
+        this.preferenceStatusEl.classList.add('hidden');
+        this.thumbsUpBtn.disabled = false;
+        this.suggestMoveBtn.disabled = false;
+        this.badMoveBtn.disabled = false;
+    }
+
+    hidePreferencePanel() {
+        if (!this.preferencePanelEl) return;
+        this.preferencePanelEl.classList.add('hidden');
+    }
+
+    enterSuggestionMode() {
+        this.isSuggestingMove = true;
+        this.preferenceTextEl.textContent = 'Click on the board where you would have played instead. You can suggest multiple moves. Press Escape when done.';
+        this.boardEl.classList.add('suggestion-mode');
+        this.thumbsUpBtn.disabled = true;
+        this.suggestMoveBtn.disabled = true;
+        this.badMoveBtn.disabled = true;
+    }
+
+    exitSuggestionMode() {
+        this.isSuggestingMove = false;
+        this.boardEl.classList.remove('suggestion-mode');
+        this.hidePreferencePanel();
+    }
+
+    async submitPreference(preferredMove) {
+        if (this.lastAiMove === null || !this.sessionId) return;
+
+        const isThumbsUp = preferredMove === null;
+        const prefMove = isThumbsUp ? this.lastAiMove : preferredMove;
+        const prefType = isThumbsUp ? 'good' : 'suggest';
+
+        try {
+            const response = await fetch(`${API_BASE}/game/${this.sessionId}/preference`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ai_move: this.lastAiMove,
+                    preferred_move: prefMove,
+                    move_number: this.moveCount,
+                    type: prefType,
+                })
+            });
+
+            if (response.ok) {
+                this.preferenceStatusEl.classList.remove('hidden');
+                this.refreshPreferenceCount();
+
+                if (this.isSuggestingMove) {
+                    // Stay in suggestion mode — show message encouraging more suggestions
+                    this.preferenceStatusEl.textContent = 'Suggestion recorded! Click another cell to suggest more, or press Escape when done.';
+                } else {
+                    this.thumbsUpBtn.disabled = true;
+                    this.suggestMoveBtn.disabled = true;
+                    this.badMoveBtn.disabled = true;
+                    this.preferenceStatusEl.textContent = isThumbsUp
+                        ? 'Thanks! Good move recorded.'
+                        : 'Thanks! Better move suggestion recorded.';
+                    // Hide panel after a short delay
+                    setTimeout(() => this.hidePreferencePanel(), 1500);
+                }
+            } else {
+                console.warn('Failed to submit preference');
+            }
+        } catch (err) {
+            console.error('Preference submission failed:', err);
+        }
+    }
+
+    async submitBadMove() {
+        if (this.lastAiMove === null || !this.sessionId) return;
+
+        try {
+            const response = await fetch(`${API_BASE}/game/${this.sessionId}/preference`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ai_move: this.lastAiMove,
+                    preferred_move: null,
+                    move_number: this.moveCount,
+                    type: 'bad',
+                })
+            });
+
+            if (response.ok) {
+                this.preferenceStatusEl.textContent = 'Thanks! Bad move recorded.';
+                this.preferenceStatusEl.classList.remove('hidden');
+                this.thumbsUpBtn.disabled = true;
+                this.suggestMoveBtn.disabled = true;
+                this.badMoveBtn.disabled = true;
+                this.refreshPreferenceCount();
+
+                setTimeout(() => this.hidePreferencePanel(), 1500);
+            } else {
+                console.warn('Failed to submit bad move');
+            }
+        } catch (err) {
+            console.error('Bad move submission failed:', err);
+        }
+    }
+
+    async refreshPreferenceCount() {
+        try {
+            const response = await fetch(`${API_BASE}/preferences/count`);
+            const data = await response.json();
+            this.prefCountEl.textContent = data.total_preferences || 0;
+        } catch (err) {
+            console.error('Failed to load preference count:', err);
         }
     }
 

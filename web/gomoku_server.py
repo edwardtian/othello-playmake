@@ -12,6 +12,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import uuid
+import datetime
+import json
 import numpy as np
 import torch
 from typing import Optional, Dict
@@ -37,6 +39,9 @@ _device: str = 'cpu'
 
 # Active game sessions
 _sessions: Dict[str, 'GameSession'] = {}
+
+# Preference storage directory
+PREFERENCE_DIR = 'data/human_preferences'
 
 
 def get_model() -> OthelloNet:
@@ -158,6 +163,44 @@ class LoadCheckpointRequest(BaseModel):
     checkpoint_path: str
 
 
+class PreferenceRequest(BaseModel):
+    ai_move: int
+    preferred_move: Optional[int] = None
+    move_number: int = 0
+    type: str = 'good'  # 'good', 'suggest', 'bad'
+
+
+def _save_preference(session_id: str, state: np.ndarray, ai_move: int, preferred_move: Optional[int], move_number: int = 0, pref_type: str = 'good'):
+    """Save a single preference pair to disk."""
+    os.makedirs(PREFERENCE_DIR, exist_ok=True)
+    today = datetime.datetime.now().strftime('%Y%m%d')
+    daily_dir = os.path.join(PREFERENCE_DIR, today)
+    os.makedirs(daily_dir, exist_ok=True)
+
+    pref_file = os.path.join(daily_dir, f'session_{session_id}.json')
+
+    entry = {
+        'state': state.tolist(),
+        'preferred_action': preferred_move,
+        'rejected_action': ai_move,
+        'move_number': move_number,
+        'type': pref_type,
+        'timestamp': datetime.datetime.now().isoformat(),
+    }
+
+    # Append to existing file or create new
+    if os.path.exists(pref_file):
+        with open(pref_file, 'r') as f:
+            data = json.load(f)
+    else:
+        data = {'session_id': session_id, 'preferences': []}
+
+    data['preferences'].append(entry)
+
+    with open(pref_file, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
 # API Endpoints
 @app.post("/api/game/new")
 def new_game(request: NewGameRequest):
@@ -226,6 +269,44 @@ def get_thinking(session_id: str):
     return session.thinking_data
 
 
+@app.post("/api/game/{session_id}/preference")
+def submit_preference(session_id: str, request: PreferenceRequest):
+    """Submit a human preference pair for an AI move."""
+    if session_id not in _sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = _sessions[session_id]
+    state = session.game.get_state_planes()
+
+    _save_preference(
+        session_id=session_id,
+        state=state,
+        ai_move=request.ai_move,
+        preferred_move=request.preferred_move,
+        move_number=request.move_number,
+        pref_type=request.type,
+    )
+
+    return {'status': 'success', 'message': 'Preference saved'}
+
+
+@app.get("/api/preferences/count")
+def get_preference_count():
+    """Get total number of saved preference pairs."""
+    count = 0
+    if os.path.exists(PREFERENCE_DIR):
+        for root, dirs, files in os.walk(PREFERENCE_DIR):
+            for f in files:
+                if f.endswith('.json'):
+                    try:
+                        with open(os.path.join(root, f), 'r') as fp:
+                            data = json.load(fp)
+                            count += len(data.get('preferences', []))
+                    except:
+                        pass
+    return {'total_preferences': count}
+
+
 @app.post("/api/ai/load_checkpoint")
 def load_checkpoint(request: LoadCheckpointRequest):
     """Load a model checkpoint for play."""
@@ -269,14 +350,26 @@ def load_checkpoint(request: LoadCheckpointRequest):
 
 @app.get("/api/checkpoints")
 def list_checkpoints():
-    """List available Gomoku checkpoints."""
-    checkpoint_dir = 'data/gomoku_checkpoints'
+    """List available Gomoku checkpoints from all relevant directories."""
+    checkpoint_dirs = [
+        ('data/gomoku_checkpoints', 'Gomoku'),
+        ('data/human_rl', 'Human RL'),
+        ('data/checkpoints', 'Othello'),
+    ]
     checkpoints = []
-    if os.path.exists(checkpoint_dir):
+
+    for checkpoint_dir, source in checkpoint_dirs:
+        if not os.path.exists(checkpoint_dir):
+            continue
         for name in sorted(os.listdir(checkpoint_dir), reverse=True):
             path = os.path.join(checkpoint_dir, name)
-            if os.path.isdir(path) and os.path.exists(os.path.join(path, 'model.pt')):
-                checkpoints.append({'name': name, 'path': path})
+            if os.path.isdir(path):
+                if os.path.exists(os.path.join(path, 'model.pt')):
+                    checkpoints.append({'name': f'[{source}] {name}', 'path': path})
+            elif name.endswith('.pt') and os.path.isfile(path):
+                # Direct .pt files (e.g., best_model.pt)
+                checkpoints.append({'name': f'[{source}] {name}', 'path': path})
+
     return {'checkpoints': checkpoints}
 
 

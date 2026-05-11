@@ -257,6 +257,93 @@ header h1 {
     color: #aaa;
 }
 
+/* Preference panel */
+.preference-panel {
+    margin-top: 15px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    border: 1px solid rgba(0, 212, 255, 0.2);
+}
+
+.preference-panel h3 {
+    margin-bottom: 6px;
+    color: #00d4ff;
+    font-size: 1rem;
+}
+
+.preference-panel p {
+    color: #aaa;
+    font-size: 0.85rem;
+    margin-bottom: 8px;
+}
+
+.preference-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.btn.preference-btn {
+    background: #2a5a2a;
+    color: #cfc;
+    font-size: 0.85rem;
+}
+
+.btn.preference-btn:hover {
+    background: #3a7a3a;
+}
+
+.btn.preference-btn.secondary {
+    background: #5a3a2a;
+    color: #fcc;
+}
+
+.btn.preference-btn.secondary:hover {
+    background: #7a4a3a;
+}
+
+.btn.preference-btn.bad {
+    background: #5a1a1a;
+    color: #fcc;
+}
+
+.btn.preference-btn.bad:hover {
+    background: #7a2a2a;
+}
+
+.shortcut-hint {
+    font-size: 0.75rem;
+    color: #666;
+    margin-top: 4px;
+    margin-bottom: 0;
+}
+
+.preference-status {
+    margin-top: 8px;
+    font-size: 0.85rem;
+    color: #0f0;
+    min-height: 1.2rem;
+}
+
+/* Suggestion mode highlight */
+.board.suggestion-mode .cell {
+    cursor: crosshair;
+}
+
+.board.suggestion-mode .cell:hover {
+    background: #90EE90;
+    box-shadow: inset 0 0 0 2px #228B22;
+}
+
+/* Preference stats */
+.preference-stats {
+    margin-top: 10px;
+    font-size: 0.8rem;
+    color: #888;
+}
+
 @media (max-width: 640px) {
     .board {
         max-width: 95vw;
