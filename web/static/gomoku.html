@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gomoku AI Playground</title>
-    <link rel="stylesheet" href="css/gomoku_style.css?v=4">
+    <link rel="stylesheet" href="css/gomoku_style.css?v=5">
 </head>
 <body>
     <div class="container">
@@ -19,6 +19,7 @@
                 <select id="gameMode">
                     <option value="human-black">Play as Black (you start)</option>
                     <option value="human-white">Play as White</option>
+                    <option value="human-vs-human">Human vs Human (record for training)</option>
                     <option value="ai-vs-ai">Watch AI vs AI</option>
                 </select>
             </div>
@@ -73,11 +74,21 @@
             <p id="preferenceStatus" class="preference-status hidden"></p>
         </div>
 
+        <div class="submit-game-panel hidden" id="submitGamePanel">
+            <h3>Record Game for AI Training</h3>
+            <p>This human-vs-human game can be used to teach the AI.</p>
+            <div class="preference-buttons">
+                <button id="submitGameBtn" class="btn preference-btn">&#128190; Submit Game</button>
+                <button id="discardGameBtn" class="btn preference-btn secondary">&#128465; Discard</button>
+            </div>
+            <p id="submitGameStatus" class="preference-status hidden"></p>
+        </div>
+
         <div class="preference-stats" id="preferenceStats">
             <span>Saved preferences: <span id="prefCount">0</span></span>
         </div>
     </div>
 
-    <script src="js/gomoku_app.js?v=7"></script>
+    <script src="js/gomoku_app.js?v=9"></script>
 </body>
 </html>

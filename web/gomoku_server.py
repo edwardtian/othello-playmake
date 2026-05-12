@@ -43,6 +43,9 @@ _sessions: Dict[str, 'GameSession'] = {}
 # Preference storage directory
 PREFERENCE_DIR = 'data/human_preferences'
 
+# Human-vs-human game storage directory (for training)
+HUMAN_GAMES_DIR = 'data/human_games'
+
 
 def get_model() -> OthelloNet:
     """Get or initialize the global AI model with CPU fallback."""
@@ -201,6 +204,44 @@ def _save_preference(session_id: str, state: np.ndarray, ai_move: int, preferred
         json.dump(data, f, indent=2)
 
 
+def _save_human_game(session: 'GameSession'):
+    """Save a completed human-vs-human game for training."""
+    os.makedirs(HUMAN_GAMES_DIR, exist_ok=True)
+    today = datetime.datetime.now().strftime('%Y%m%d')
+    daily_dir = os.path.join(HUMAN_GAMES_DIR, today)
+    os.makedirs(daily_dir, exist_ok=True)
+
+    game_file = os.path.join(daily_dir, f"{session.session_id}.json")
+
+    # Reconstruct game history with states
+    game_data = {
+        'session_id': session.session_id,
+        'mode': session.mode,
+        'moves': [],
+        'winner': None,
+        'timestamp': datetime.datetime.now().isoformat(),
+    }
+
+    # Replay the game to capture states
+    replay_game = GomokuGame()
+    for move_entry in session.move_history:
+        state = replay_game.get_state_planes()
+        game_data['moves'].append({
+            'action': move_entry['action'],
+            'player': move_entry['player'],
+            'state_before': state.tolist(),
+        })
+        replay_game.make_move(move_entry['action'])
+
+    winner, _, _ = replay_game.get_winner()
+    game_data['winner'] = int(winner) if winner is not None else None
+
+    with open(game_file, 'w') as f:
+        json.dump(game_data, f, indent=2)
+
+    return game_file
+
+
 # API Endpoints
 @app.post("/api/game/new")
 def new_game(request: NewGameRequest):
@@ -305,6 +346,45 @@ def get_preference_count():
                     except:
                         pass
     return {'total_preferences': count}
+
+
+@app.post("/api/game/{session_id}/submit")
+def submit_game(session_id: str):
+    """Submit a completed human-vs-human game for training."""
+    if session_id not in _sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = _sessions[session_id]
+    if not session.game.is_game_over():
+        raise HTTPException(status_code=400, detail="Game is not over yet")
+
+    if len(session.move_history) < 5:
+        raise HTTPException(status_code=400, detail="Game too short to be useful")
+
+    game_file = _save_human_game(session)
+
+    # Count total human games
+    total_games = 0
+    if os.path.exists(HUMAN_GAMES_DIR):
+        for root, dirs, files in os.walk(HUMAN_GAMES_DIR):
+            total_games += len([f for f in files if f.endswith('.json')])
+
+    return {
+        'status': 'success',
+        'message': 'Game saved for training',
+        'game_file': game_file,
+        'total_human_games': total_games,
+    }
+
+
+@app.get("/api/human_games/count")
+def get_human_game_count():
+    """Get total number of saved human-vs-human games."""
+    total_games = 0
+    if os.path.exists(HUMAN_GAMES_DIR):
+        for root, dirs, files in os.walk(HUMAN_GAMES_DIR):
+            total_games += len([f for f in files if f.endswith('.json')])
+    return {'total_human_games': total_games}
 
 
 @app.post("/api/ai/load_checkpoint")

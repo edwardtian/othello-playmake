@@ -59,6 +59,18 @@ def parse_args():
                         help='Weight for RM rewards in PPO')
     parser.add_argument('--original-value-weight', type=float, default=0.0,
                         help='Weight for original game outcomes in PPO returns')
+    parser.add_argument('--ppo-clip', type=float, default=0.2,
+                        help='PPO clipping epsilon')
+    parser.add_argument('--ppo-value-coef', type=float, default=0.5,
+                        help='PPO value loss coefficient')
+    parser.add_argument('--ppo-entropy-coef', type=float, default=0.01,
+                        help='PPO entropy bonus coefficient')
+    parser.add_argument('--ppo-inner-epochs', type=int, default=4,
+                        help='PPO update epochs per sampled batch')
+    parser.add_argument('--ppo-entropy-min', type=float, default=0.5,
+                        help='PPO early-stop entropy threshold (stops if entropy drops below this)')
+    parser.add_argument('--use-bc', action='store_true',
+                        help='Use Behavioral Cloning instead of PPO (more stable)')
     return parser.parse_args()
 
 
@@ -137,6 +149,11 @@ def main():
         lr_ppo=args.lr_ppo,
         batch_size=args.batch_size,
         checkpoint_dir=args.checkpoint_dir,
+        ppo_clip_eps=args.ppo_clip,
+        ppo_value_coef=args.ppo_value_coef,
+        ppo_entropy_coef=args.ppo_entropy_coef,
+        ppo_epochs=args.ppo_inner_epochs,
+        ppo_entropy_min=args.ppo_entropy_min,
     )
 
     # Try to resume Human RL checkpoint
@@ -147,39 +164,44 @@ def main():
     print("\n[4/5] Training Reward Model...")
     rm_metrics = trainer.train_reward_model(preferences, epochs=args.epochs_rm)
 
-    # Phase 2: PPO Fine-tuning
-    print("\n[5/5] PPO Fine-tuning...")
-    # Load replay buffer from original checkpoint if available
-    replay_buffer = ReplayBuffer(
-        capacity=500_000,
-        action_size=action_size,
-        board_size=board_size,
-    )
-    buffer_path = os.path.join(os.path.dirname(model_file), 'replay_buffer.pt')
-    if os.path.exists(buffer_path):
-        print(f"  Loading replay buffer from {buffer_path}")
-        replay_buffer.load(buffer_path)
-        print(f"  Buffer size: {len(replay_buffer)}")
+    if args.use_bc:
+        # Phase 2: Behavioral Cloning (stable alternative to PPO)
+        print("\n[5/5] Behavioral Cloning Fine-tuning...")
+        bc_metrics = trainer.bc_finetune(
+            preferences=preferences,
+            epochs=args.epochs_ppo,  # re-use epochs-ppo as epochs-bc
+        )
     else:
-        print("  No replay buffer found; using small synthetic buffer for PPO")
-        # If no buffer, we can't do PPO — warn user
-        print("  [Warning] PPO requires a replay buffer. Generate self-play data first,")
-        print("            or the preference data alone will be used for RM training.")
-        # We'll create a minimal buffer from preference states
-        for pref in preferences:
-            # Add preference state with uniform policy and zero value as placeholder
-            policy = np.zeros(action_size, dtype=np.float32)
-            policy[pref.preferred_action] = 1.0
-            replay_buffer.add(pref.state, policy, 0.0)
-        print(f"  Created buffer from preferences: {len(replay_buffer)} samples")
+        # Phase 2: PPO Fine-tuning
+        print("\n[5/5] PPO Fine-tuning...")
+        # Load replay buffer from original checkpoint if available
+        replay_buffer = ReplayBuffer(
+            capacity=500_000,
+            action_size=action_size,
+            board_size=board_size,
+        )
+        buffer_path = os.path.join(os.path.dirname(model_file), 'replay_buffer.pt')
+        if os.path.exists(buffer_path):
+            print(f"  Loading replay buffer from {buffer_path}")
+            replay_buffer.load(buffer_path)
+            print(f"  Buffer size: {len(replay_buffer)}")
+        else:
+            print("  No replay buffer found; using small synthetic buffer for PPO")
+            print("  [Warning] PPO requires a replay buffer. Generate self-play data first,")
+            print("            or the preference data alone will be used for RM training.")
+            for pref in preferences:
+                policy = np.zeros(action_size, dtype=np.float32)
+                policy[pref.preferred_action] = 1.0
+                replay_buffer.add(pref.state, policy, 0.0)
+            print(f"  Created buffer from preferences: {len(replay_buffer)} samples")
 
-    ppo_metrics = trainer.ppo_finetune(
-        replay_buffer=replay_buffer,
-        rm_reward_weight=args.rm_reward_weight,
-        original_value_weight=args.original_value_weight,
-        epochs=args.epochs_ppo,
-        steps_per_epoch=args.ppo_steps,
-    )
+        ppo_metrics = trainer.ppo_finetune(
+            replay_buffer=replay_buffer,
+            rm_reward_weight=args.rm_reward_weight,
+            original_value_weight=args.original_value_weight,
+            epochs=args.epochs_ppo,
+            steps_per_epoch=args.ppo_steps,
+        )
 
     # Save final checkpoint
     print("\n[Saving] Saving Human RL checkpoint...")

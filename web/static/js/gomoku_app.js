@@ -50,6 +50,12 @@ class GomokuApp {
         this.badMoveBtn = document.getElementById('badMoveBtn');
         this.preferenceStatusEl = document.getElementById('preferenceStatus');
         this.prefCountEl = document.getElementById('prefCount');
+
+        // Submit game UI elements
+        this.submitGamePanelEl = document.getElementById('submitGamePanel');
+        this.submitGameBtn = document.getElementById('submitGameBtn');
+        this.discardGameBtn = document.getElementById('discardGameBtn');
+        this.submitGameStatusEl = document.getElementById('submitGameStatus');
     }
 
     initEventListeners() {
@@ -65,6 +71,10 @@ class GomokuApp {
         this.thumbsUpBtn.addEventListener('click', () => this.submitPreference(null));
         this.suggestMoveBtn.addEventListener('click', () => this.enterSuggestionMode());
         this.badMoveBtn.addEventListener('click', () => this.submitBadMove());
+
+        // Submit game buttons
+        this.submitGameBtn.addEventListener('click', () => this.submitGame());
+        this.discardGameBtn.addEventListener('click', () => this.hideSubmitGamePanel());
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
@@ -205,8 +215,13 @@ class GomokuApp {
         if (this.isSuggestingMove) {
             if (this.lastAiMove !== null && action !== this.lastAiMove) {
                 await this.submitPreference(action);
-                // Stay in suggestion mode — user can click another cell
             }
+            return;
+        }
+
+        // In human-vs-human mode, both players click the board
+        if (this.mode === 'human-vs-human') {
+            await this.makeMove(action);
             return;
         }
 
@@ -239,6 +254,13 @@ class GomokuApp {
 
             if (data.is_game_over) {
                 this.showGameOver(data);
+                // For human-vs-human, show submit panel after game ends
+                if (this.mode === 'human-vs-human') {
+                    this.showSubmitGamePanel();
+                }
+            } else if (this.mode === 'human-vs-human') {
+                // Human vs human: no AI, just wait for next human click
+                return;
             } else if (this.mode !== 'ai-vs-ai' && data.current_player !== this.humanColor) {
                 // Trigger AI move after human move
                 setTimeout(() => this.requestAIMove(), 300);
@@ -413,6 +435,44 @@ class GomokuApp {
             this.prefCountEl.textContent = data.total_preferences || 0;
         } catch (err) {
             console.error('Failed to load preference count:', err);
+        }
+    }
+
+    // Submit game panel methods
+    showSubmitGamePanel() {
+        if (!this.submitGamePanelEl) return;
+        this.submitGamePanelEl.classList.remove('hidden');
+        this.submitGameStatusEl.textContent = '';
+        this.submitGameStatusEl.classList.add('hidden');
+        this.submitGameBtn.disabled = false;  // re-enable for new games
+    }
+
+    hideSubmitGamePanel() {
+        if (!this.submitGamePanelEl) return;
+        this.submitGamePanelEl.classList.add('hidden');
+    }
+
+    async submitGame() {
+        if (!this.sessionId) return;
+
+        try {
+            const response = await fetch(`${API_BASE}/game/${this.sessionId}/submit`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                this.submitGameStatusEl.textContent = `Game submitted! Total human games: ${data.total_human_games || 0}`;
+                this.submitGameStatusEl.classList.remove('hidden');
+                this.submitGameBtn.disabled = true;
+
+                setTimeout(() => this.hideSubmitGamePanel(), 2000);
+            } else {
+                console.warn('Failed to submit game');
+            }
+        } catch (err) {
+            console.error('Game submission failed:', err);
         }
     }
 

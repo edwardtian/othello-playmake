@@ -67,6 +67,7 @@ class HumanRLTrainer:
         ppo_epochs: int = 4,
         batch_size: int = 64,
         checkpoint_dir: str = 'data/human_rl',
+        ppo_entropy_min: float = 0.5,
     ):
         self.policy_model = policy_model.to(device)
         self.reward_model = reward_model.to(device)
@@ -77,6 +78,7 @@ class HumanRLTrainer:
         self.ppo_epochs = ppo_epochs
         self.batch_size = batch_size
         self.checkpoint_dir = checkpoint_dir
+        self.ppo_entropy_min = ppo_entropy_min
 
         os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -336,6 +338,89 @@ class HumanRLTrainer:
                 f"Entropy: {avg_metrics.get('ppo_entropy', 0):.4f} | "
                 f"Ratio: {avg_metrics.get('ppo_ratio_mean', 0):.3f}"
             )
+
+            # Early stopping: halt if entropy collapses
+            current_entropy = avg_metrics.get('ppo_entropy', float('inf'))
+            if current_entropy < self.ppo_entropy_min:
+                print(f"\n[STOP] Entropy collapsed to {current_entropy:.4f} (below {self.ppo_entropy_min}). "
+                      f"Halting PPO at epoch {epoch + 1} to prevent catastrophic forgetting.")
+                break
+
+        return all_metrics
+
+    def bc_finetune(
+        self,
+        preferences: List[PreferencePair],
+        epochs: int = 20,
+    ) -> List[Dict[str, float]]:
+        """
+        Behavioral Cloning fine-tuning on human preferences.
+
+        Much more stable than PPO for this architecture.
+        Directly trains policy to output preferred actions via cross-entropy.
+
+        Args:
+            preferences: Human preference pairs
+            epochs: Number of BC epochs
+
+        Returns:
+            List of metric dicts per epoch
+        """
+        if len(preferences) == 0:
+            print("[BC] No preferences to train on.")
+            return []
+
+        self.policy_model.train()
+        n = len(preferences)
+        all_metrics = []
+
+        for epoch in range(epochs):
+            indices = np.random.permutation(n)
+            total_loss = 0.0
+            total_acc = 0.0
+            num_batches = 0
+
+            for i in range(0, n, self.batch_size):
+                batch_idx = indices[i:i + self.batch_size]
+                batch = [preferences[j] for j in batch_idx]
+
+                # Filter to preferences with a known preferred action
+                valid_batch = [p for p in batch if p.preferred_action is not None]
+                if len(valid_batch) == 0:
+                    continue
+
+                states = torch.stack([
+                    torch.from_numpy(p.state) for p in valid_batch
+                ]).to(self.device)
+                actions = torch.tensor([p.preferred_action for p in valid_batch], dtype=torch.long, device=self.device)
+
+                policy_logits, _ = self.policy_model(states)
+                loss = F.cross_entropy(policy_logits, actions)
+
+                self.ppo_optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.policy_model.parameters(), max_norm=1.0)
+                self.ppo_optimizer.step()
+
+                # Accuracy
+                pred_actions = policy_logits.argmax(dim=-1)
+                acc = (pred_actions == actions).float().mean().item()
+
+                total_loss += loss.item()
+                total_acc += acc
+                num_batches += 1
+
+            avg_loss = total_loss / max(num_batches, 1)
+            avg_acc = total_acc / max(num_batches, 1)
+            metrics = {
+                'bc_loss': avg_loss,
+                'bc_acc': avg_acc,
+                'epoch': epoch + 1,
+            }
+            all_metrics.append(metrics)
+
+            if (epoch + 1) % 5 == 0 or epoch == 0:
+                print(f"[BC] Epoch {epoch + 1}/{epochs} | Loss: {avg_loss:.4f} | Acc: {avg_acc:.2%}")
 
         return all_metrics
 
